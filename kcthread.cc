@@ -16,6 +16,11 @@
 #include "kcthread.h"
 #include "myconf.h"
 
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <iostream>
+#include <fstream>
+
 namespace kyotocabinet {                 // common namespace
 
 
@@ -120,8 +125,73 @@ void Thread::start() {
   _assert_(true);
   ThreadCore* core = (ThreadCore*)opq_;
   if (core->alive) throw std::invalid_argument("already started");
-  if (::pthread_create(&core->th, NULL, threadrun, this) != 0)
-    throw std::runtime_error("pthread_create");
+  
+  // Report some info about the environment
+  struct rlimit limits;
+  
+  getrlimit(RLIMIT_STACK, &limits);
+  std::cerr << "Stack limits: ";
+  if (limits.rlim_cur == RLIM_INFINITY) {
+    std::cerr << "Infinity";
+  } else {
+    std::cerr << limits.rlim_cur;
+  }
+  std::cerr << " ";
+  if (limits.rlim_max == RLIM_INFINITY) {
+    std::cerr << "Infinity";
+  } else {
+    std::cerr << limits.rlim_max;
+  }
+  std::cerr << std::endl;
+  
+  getrlimit(RLIMIT_NPROC, &limits);
+  std::cerr << "Process limits: ";
+  if (limits.rlim_cur == RLIM_INFINITY) {
+    std::cerr << "Infinity";
+  } else {
+    std::cerr << limits.rlim_cur;
+  }
+  std::cerr << " ";
+  if (limits.rlim_max == RLIM_INFINITY) {
+    std::cerr << "Infinity";
+  } else {
+    std::cerr << limits.rlim_max;
+  }
+  std::cerr << std::endl;
+  
+  std::cerr << "Kernel thread cap: ";
+  std::ifstream capfile("/proc/sys/kernel/threads-max");
+  char c;
+  while (capfile.get(c)) {
+    std::cerr << c;
+  }
+  std::cerr << std::endl;
+  
+  std::cerr << "All threads running:" << std::endl;
+  system("ps -eL");
+  
+  // Define addributes for the new thread
+  pthread_attr_t new_thread_attributes;
+  pthread_attr_init(&new_thread_attributes);
+  
+  // Try to force it to a reasonable stack size (2 MiB)
+  pthread_attr_setstacksize(&new_thread_attributes, 2 * 1024 * 1024);
+  
+  int result = ::pthread_create(&core->th, &new_thread_attributes, threadrun, this);
+  if (result != 0) {
+    if (result == EAGAIN) {
+      throw std::runtime_error("pthread_create: EAGAIN: Insufficient resources to create thread, or thread limit reached");
+    } else if (result == EINVAL) {
+      throw std::runtime_error("pthread_create: EINVAL: Invalid thread attributes requested");
+    } else if (result == EPERM) {
+      throw std::runtime_error("pthread_create: EPERM: Insufficient permissions to adopt requested scheduling policy");
+    } else {
+      throw std::runtime_error("pthread_create: Returned error code not permitted by specification");
+    }
+  }
+  
+  pthread_attr_destroy(&new_thread_attributes);
+  
   core->alive = true;
 #endif
 }
