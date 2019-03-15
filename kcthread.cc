@@ -165,10 +165,20 @@ void Thread::start() {
   while (capfile.get(c)) {
     std::cerr << c;
   }
-  std::cerr << std::endl;
+  // Newline is included
   
-  std::cerr << "All threads running:" << std::endl;
-  system("ps -eL");
+  // This is the POSIX way to count threads, apparently. ps is specified, but not any functions.
+  FILE* ps_process = popen("ps -eL", "r");
+  int newlines = 0;
+  for (c = fgetc(ps_process); c != EOF; c = fgetc(ps_process)) {
+    if (c == '\n') {
+      newlines++;
+    }
+  }
+  pclose(ps_process);
+  
+  // Knock off 1 for the header
+  std::cerr << "Current total threads running: " << (newlines - 1) << std::endl;
   
   // Define addributes for the new thread
   pthread_attr_t new_thread_attributes;
